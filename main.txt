@@ -1,12 +1,100 @@
+-- Проверка на уже существующий GUI (защита от двойного запуска)
+if game.Players.LocalPlayer:FindFirstChild("PlayerGui"):FindFirstChild("RSH") then
+    script:Destroy()
+    return
+end
+
+-- Основные сервисы
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+-- Создаем главный GUI
 local SG = Instance.new("ScreenGui")
-SG.Parent = game.Players.LocalPlayer:WaitForChild("PlayerGui")
 SG.Name = "RSH"
 SG.ResetOnSpawn = false
+SG.Parent = game.Players.LocalPlayer:WaitForChild("PlayerGui")
 
--- Создаем TweenService для плавных анимаций
-local TweenService = game:GetService("TweenService")
+-- Система подсветки игроков
+local HighlightSystem = {
+    Enabled = false,
+    Color = Color3.fromRGB(255, 50, 50),
+    Highlights = {},
+    Connections = {}
+}
 
--- Основной фрейм с анимацией
+function HighlightSystem:UpdatePlayerHighlight(player)
+    -- Удаляем старую подсветку
+    if self.Highlights[player] then
+        self.Highlights[player]:Destroy()
+    end
+
+    -- Создаем новую если включено
+    if self.Enabled and player.Character then
+        local highlight = Instance.new("Highlight")
+        highlight.FillColor = self.Color
+        highlight.OutlineColor = Color3.new(
+            math.min(self.Color.R * 1.5, 1),
+            math.min(self.Color.G * 1.5, 1),
+            math.min(self.Color.B * 1.5, 1)
+        )
+        highlight.Parent = player.Character
+        self.Highlights[player] = highlight
+    end
+end
+
+function HighlightSystem:SetEnabled(state)
+    if self.Enabled == state then return end
+    
+    self.Enabled = state
+    
+    if state then
+        -- Подписываемся на новых игроков
+        self.Connections.playerAdded = game.Players.PlayerAdded:Connect(function(player)
+            self:UpdatePlayerHighlight(player)
+        end)
+        
+        -- Подсвечиваем всех текущих игроков
+        for _, player in ipairs(game.Players:GetPlayers()) do
+            if player ~= game.Players.LocalPlayer then
+                self:UpdatePlayerHighlight(player)
+                
+                -- Отслеживаем смену персонажа
+                self.Connections[player] = player.CharacterAdded:Connect(function(char)
+                    self:UpdatePlayerHighlight(player)
+                end)
+            end
+        end
+    else
+        -- Очищаем подсветки
+        for player, highlight in pairs(self.Highlights) do
+            highlight:Destroy()
+        end
+        self.Highlights = {}
+        
+        -- Отписываемся от событий
+        for _, conn in pairs(self.Connections) do
+            conn:Disconnect()
+        end
+        self.Connections = {}
+    end
+end
+
+function HighlightSystem:SetColor(color)
+    self.Color = color
+    if self.Enabled then
+        for _, highlight in pairs(self.Highlights) do
+            highlight.FillColor = color
+            highlight.OutlineColor = Color3.new(
+                math.min(color.R * 1.5, 1),
+                math.min(color.G * 1.5, 1),
+                math.min(color.B * 1.5, 1)
+            )
+        end
+    end
+end
+
+-- Основной фрейм GUI
 local F = Instance.new("Frame")
 F.Size = UDim2.new(0, 1000, 0, 700)
 F.Position = UDim2.new(0.5, 0, 0.5, 0)
@@ -16,36 +104,26 @@ F.BackgroundTransparency = 0.1
 F.BorderSizePixel = 0
 F.Parent = SG
 
--- Анимация появления/исчезновения
+-- Анимация открытия/закрытия
 local function TweenFrame(visible)
-    local tweenInfo = TweenInfo.new(
-        0.3,
-        Enum.EasingStyle.Quad,
-        Enum.EasingDirection.Out
-    )
+    local tweenInfo = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
     
     if visible then
         F.Visible = true
-        local tween = TweenService:Create(F, tweenInfo, {
+        TweenService:Create(F, tweenInfo, {
             Size = UDim2.new(0, 1000, 0, 700),
             BackgroundTransparency = 0.1
-        })
-        tween:Play()
+        }):Play()
     else
-        local tween = TweenService:Create(F, tweenInfo, {
+        TweenService:Create(F, tweenInfo, {
             Size = UDim2.new(0, 0, 0, 700),
             BackgroundTransparency = 1
-        })
-        tween:Play()
-        tween.Completed:Connect(function()
-            F.Visible = false
-        end)
+        }):Play()
     end
 end
 
--- Кнопка закрытия/открытия с анимацией
+-- Кнопка меню
 local ToggleButton = Instance.new("TextButton")
-ToggleButton.Name = "ToggleButton"
 ToggleButton.Text = "☰"
 ToggleButton.TextColor3 = Color3.new(1, 1, 1)
 ToggleButton.TextSize = 18
@@ -57,7 +135,7 @@ ToggleButton.BorderSizePixel = 0
 ToggleButton.AutoButtonColor = false
 ToggleButton.Parent = SG
 
--- Заголовок с анимацией
+-- Заголовок
 local Title = Instance.new("TextLabel")
 Title.Text = "Roblox Studio Hack"
 Title.TextColor3 = Color3.new(1, 1, 1)
@@ -69,124 +147,167 @@ Title.Font = Enum.Font.GothamBold
 Title.TextSize = 22
 Title.Parent = F
 
--- Кнопка полёта с анимацией
-local FlyButton = Instance.new("TextButton")
-FlyButton.Text = "ВКЛЮЧИТЬ ПОЛЁТ"
-FlyButton.TextColor3 = Color3.new(1, 1, 1)
-FlyButton.Size = UDim2.new(0, 300, 0, 60)
-FlyButton.Position = UDim2.new(0.3, -150, 0.15, -30)
-FlyButton.AnchorPoint = Vector2.new(0.5, 0.5)
-FlyButton.BackgroundColor3 = Color3.fromRGB(80, 80, 255)
-FlyButton.BorderSizePixel = 0
-FlyButton.TextSize = 18
-FlyButton.Font = Enum.Font.GothamBold
-FlyButton.Parent = F
+-- Уведомления
+local function ShowNotification(text)
+    local Notification = Instance.new("TextLabel")
+    Notification.Text = text
+    Notification.TextColor3 = Color3.new(1, 1, 1)
+    Notification.Size = UDim2.new(0, 300, 0, 60)
+    Notification.Position = UDim2.new(1, -320, 1, -80)
+    Notification.AnchorPoint = Vector2.new(1, 1)
+    Notification.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    Notification.BackgroundTransparency = 0.3
+    Notification.BorderSizePixel = 0
+    Notification.TextSize = 16
+    Notification.Font = Enum.Font.Gotham
+    Notification.Parent = SG
+    
+    Notification.Size = UDim2.new(0, 0, 0, 60)
+    TweenService:Create(Notification, TweenInfo.new(0.3), {
+        Size = UDim2.new(0, 300, 0, 60)
+    }):Play()
+    
+    delay(3, function()
+        TweenService:Create(Notification, TweenInfo.new(0.3), {
+            Size = UDim2.new(0, 0, 0, 60)
+        }):Play()
+    end)
+end
 
--- Фрейм управления скоростью полёта
-local SpeedFrame = Instance.new("Frame")
-SpeedFrame.Size = UDim2.new(0, 300, 0, 80)
-SpeedFrame.Position = UDim2.new(0.3, -150, 0.3, -30)
-SpeedFrame.AnchorPoint = Vector2.new(0.5, 0.5)
-SpeedFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-SpeedFrame.BorderSizePixel = 0
-SpeedFrame.Parent = F
+-- Система полета
+local FlightSystem = {
+    Enabled = false,
+    Speed = 50,
+    BodyGyro = nil,
+    BodyVelocity = nil
+}
 
-local SpeedLabel = Instance.new("TextLabel")
-SpeedLabel.Text = "Скорость полёта:"
-SpeedLabel.TextColor3 = Color3.new(1, 1, 1)
-SpeedLabel.Size = UDim2.new(1, -20, 0, 20)
-SpeedLabel.Position = UDim2.new(0, 10, 0, 5)
-SpeedLabel.TextXAlignment = Enum.TextXAlignment.Left
-SpeedLabel.BackgroundTransparency = 1
-SpeedLabel.Font = Enum.Font.Gotham
-SpeedLabel.TextSize = 14
-SpeedLabel.Parent = SpeedFrame
+function FlightSystem:SetEnabled(state)
+    if self.Enabled == state then return end
+    
+    local character = game.Players.LocalPlayer.Character
+    if not character then return end
+    
+    local humanoid = character:FindFirstChild("Humanoid")
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not humanoid or not rootPart then return end
+    
+    if state then
+        humanoid.PlatformStand = true
+        
+        self.BodyGyro = Instance.new("BodyGyro")
+        self.BodyGyro.P = 10000
+        self.BodyGyro.MaxTorque = Vector3.new(10000, 10000, 10000)
+        self.BodyGyro.CFrame = workspace.CurrentCamera.CFrame
+        self.BodyGyro.Parent = rootPart
+        
+        self.BodyVelocity = Instance.new("BodyVelocity")
+        self.BodyVelocity.Velocity = Vector3.new(0, 0, 0)
+        self.BodyVelocity.MaxForce = Vector3.new(10000, 10000, 10000)
+        self.BodyVelocity.Parent = rootPart
+    else
+        humanoid.PlatformStand = false
+        if self.BodyGyro then self.BodyGyro:Destroy() end
+        if self.BodyVelocity then self.BodyVelocity:Destroy() end
+    end
+    
+    self.Enabled = state
+end
 
-local SpeedBox = Instance.new("TextBox")
-SpeedBox.PlaceholderText = "Текущая: 50"
-SpeedBox.Text = "50"
-SpeedBox.Size = UDim2.new(0.6, -10, 0, 25)
-SpeedBox.Position = UDim2.new(0, 5, 0, 30)
-SpeedBox.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-SpeedBox.TextColor3 = Color3.new(1, 1, 1)
-SpeedBox.Parent = SpeedFrame
+-- Система NoClip
+local NoClipSystem = {
+    Enabled = false,
+    OriginalWalkSpeed = 16,
+    Connections = {}
+}
 
-local ApplySpeedButton = Instance.new("TextButton")
-ApplySpeedButton.Text = "Применить"
-ApplySpeedButton.TextColor3 = Color3.new(1, 1, 1)
-ApplySpeedButton.Size = UDim2.new(0.35, -10, 0, 25)
-ApplySpeedButton.Position = UDim2.new(0.65, 5, 0, 30)
-ApplySpeedButton.BackgroundColor3 = Color3.fromRGB(80, 80, 255)
-ApplySpeedButton.BorderSizePixel = 0
-ApplySpeedButton.TextSize = 14
-ApplySpeedButton.Parent = SpeedFrame
+function NoClipSystem:SetEnabled(state)
+    if self.Enabled == state then return end
+    
+    local character = game.Players.LocalPlayer.Character
+    if not character then return end
+    
+    if state then
+        -- Сохраняем оригинальную скорость
+        local humanoid = character:FindFirstChild("Humanoid")
+        if humanoid then
+            self.OriginalWalkSpeed = humanoid.WalkSpeed
+        end
+        
+        -- Делаем части неколлизионными
+        for _, part in ipairs(character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = false
+            end
+        end
+        
+        -- Отслеживаем новые части
+        self.Connections.descendantAdded = character.DescendantAdded:Connect(function(descendant)
+            if descendant:IsA("BasePart") then
+                descendant.CanCollide = false
+            end
+        end)
+    else
+        -- Восстанавливаем коллизии
+        for _, part in ipairs(character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = true
+            end
+        end
+        
+        -- Восстанавливаем скорость
+        local humanoid = character:FindFirstChild("Humanoid")
+        if humanoid then
+            humanoid.WalkSpeed = self.OriginalWalkSpeed
+        end
+        
+        -- Очищаем соединения
+        for _, conn in pairs(self.Connections) do
+            conn:Disconnect()
+        end
+        self.Connections = {}
+    end
+    
+    self.Enabled = state
+end
 
--- Фрейм управления скоростью ходьбы
-local WalkSpeedFrame = Instance.new("Frame")
-WalkSpeedFrame.Size = UDim2.new(0, 300, 0, 80)
-WalkSpeedFrame.Position = UDim2.new(0.7, -150, 0.15, -30)
-WalkSpeedFrame.AnchorPoint = Vector2.new(0.5, 0.5)
-WalkSpeedFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-WalkSpeedFrame.BorderSizePixel = 0
-WalkSpeedFrame.Parent = F
+-- Система скорости ходьбы
+local WalkSpeedSystem = {
+    Speed = 16,
+    OriginalSpeed = 16
+}
 
-local WalkSpeedLabel = Instance.new("TextLabel")
-WalkSpeedLabel.Text = "Скорость ходьбы:"
-WalkSpeedLabel.TextColor3 = Color3.new(1, 1, 1)
-WalkSpeedLabel.Size = UDim2.new(1, -20, 0, 20)
-WalkSpeedLabel.Position = UDim2.new(0, 10, 0, 5)
-WalkSpeedLabel.TextXAlignment = Enum.TextXAlignment.Left
-WalkSpeedLabel.BackgroundTransparency = 1
-WalkSpeedLabel.Font = Enum.Font.Gotham
-WalkSpeedLabel.TextSize = 14
-WalkSpeedLabel.Parent = WalkSpeedFrame
+function WalkSpeedSystem:Apply()
+    local character = game.Players.LocalPlayer.Character
+    if not character then return end
+    
+    local humanoid = character:FindFirstChild("Humanoid")
+    if not humanoid then return end
+    
+    humanoid.WalkSpeed = self.Speed
+end
 
-local WalkSpeedBox = Instance.new("TextBox")
-WalkSpeedBox.PlaceholderText = "Текущая: 16"
-WalkSpeedBox.Text = "16"
-WalkSpeedBox.Size = UDim2.new(0.6, -10, 0, 25)
-WalkSpeedBox.Position = UDim2.new(0, 5, 0, 30)
-WalkSpeedBox.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-WalkSpeedBox.TextColor3 = Color3.new(1, 1, 1)
-WalkSpeedBox.Parent = WalkSpeedFrame
+-- Создаем элементы управления
+local function CreateButton(name, position, color)
+    local button = Instance.new("TextButton")
+    button.Text = name
+    button.TextColor3 = Color3.new(1, 1, 1)
+    button.Size = UDim2.new(0, 300, 0, 60)
+    button.Position = position
+    button.AnchorPoint = Vector2.new(0.5, 0.5)
+    button.BackgroundColor3 = color
+    button.BorderSizePixel = 0
+    button.TextSize = 18
+    button.Font = Enum.Font.GothamBold
+    button.Parent = F
+    return button
+end
 
-local ApplyWalkSpeedButton = Instance.new("TextButton")
-ApplyWalkSpeedButton.Text = "Применить"
-ApplyWalkSpeedButton.TextColor3 = Color3.new(1, 1, 1)
-ApplyWalkSpeedButton.Size = UDim2.new(0.35, -10, 0, 25)
-ApplyWalkSpeedButton.Position = UDim2.new(0.65, 5, 0, 30)
-ApplyWalkSpeedButton.BackgroundColor3 = Color3.fromRGB(80, 80, 255)
-ApplyWalkSpeedButton.BorderSizePixel = 0
-ApplyWalkSpeedButton.TextSize = 14
-ApplyWalkSpeedButton.Parent = WalkSpeedFrame
+local FlyButton = CreateButton("ВКЛЮЧИТЬ ПОЛЁТ", UDim2.new(0.3, -150, 0.15, -30), Color3.fromRGB(80, 80, 255))
+local HighlightButton = CreateButton("ПОДСВЕТКА ИГРОКОВ", UDim2.new(0.3, -150, 0.45, -30), Color3.fromRGB(255, 80, 80))
+local NoClipButton = CreateButton("ВКЛЮЧИТЬ NOCLIP", UDim2.new(0.3, -150, 0.6, -30), Color3.fromRGB(150, 50, 150))
 
--- Кнопка подсветки игроков с анимацией
-local HighlightButton = Instance.new("TextButton")
-HighlightButton.Text = "ПОДСВЕТКА ИГРОКОВ"
-HighlightButton.TextColor3 = Color3.new(1, 1, 1)
-HighlightButton.Size = UDim2.new(0, 300, 0, 60)
-HighlightButton.Position = UDim2.new(0.3, -150, 0.45, -30)
-HighlightButton.AnchorPoint = Vector2.new(0.5, 0.5)
-HighlightButton.BackgroundColor3 = Color3.fromRGB(255, 80, 80)
-HighlightButton.BorderSizePixel = 0
-HighlightButton.TextSize = 18
-HighlightButton.Font = Enum.Font.GothamBold
-HighlightButton.Parent = F
-
--- Кнопка NoClip с анимацией
-local NoClipButton = Instance.new("TextButton")
-NoClipButton.Text = "ВКЛЮЧИТЬ NOCLIP"
-NoClipButton.TextColor3 = Color3.new(1, 1, 1)
-NoClipButton.Size = UDim2.new(0, 300, 0, 60)
-NoClipButton.Position = UDim2.new(0.3, -150, 0.6, -30)
-NoClipButton.AnchorPoint = Vector2.new(0.5, 0.5)
-NoClipButton.BackgroundColor3 = Color3.fromRGB(150, 50, 150)
-NoClipButton.BorderSizePixel = 0
-NoClipButton.TextSize = 18
-NoClipButton.Font = Enum.Font.GothamBold
-NoClipButton.Parent = F
-
--- Поле для ввода цвета с анимацией
+-- Поле для ввода цвета
 local ColorInputFrame = Instance.new("Frame")
 ColorInputFrame.Size = UDim2.new(0, 300, 0, 100)
 ColorInputFrame.Position = UDim2.new(0.3, -150, 0.75, -50)
@@ -240,307 +361,107 @@ ApplyColorButton.BorderSizePixel = 0
 ApplyColorButton.TextSize = 14
 ApplyColorButton.Parent = ColorInputFrame
 
--- Переменные для управления
-local isVisible = true
-local isFlying = false
-local isHighlighting = false
-local isNoClip = false
-local flySpeed = 50
-local walkSpeed = 16
-local bodyGyro, bodyVelocity
-local highlights = {}
-local highlightColor = Color3.fromRGB(255, 50, 50)
-local connections = {}
-local originalWalkSpeed = 16
+-- Управление полетом
+local movingDirection = Vector3.new(0, 0, 0)
 
--- Функция для плавных уведомлений
-local function ShowNotification(text)
-    local Notification = Instance.new("TextLabel")
-    Notification.Text = text
-    Notification.TextColor3 = Color3.new(1, 1, 1)
-    Notification.Size = UDim2.new(0, 300, 0, 60)
-    Notification.Position = UDim2.new(1, -320, 1, -80)
-    Notification.AnchorPoint = Vector2.new(1, 1)
-    Notification.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-    Notification.BackgroundTransparency = 0.3
-    Notification.BorderSizePixel = 0
-    Notification.TextSize = 16
-    Notification.Font = Enum.Font.Gotham
-    Notification.Parent = SG
+local function UpdateFlight()
+    if not FlightSystem.Enabled then return end
     
-    Notification.Size = UDim2.new(0, 0, 0, 60)
-    local tweenIn = TweenService:Create(Notification, TweenInfo.new(0.3), {
-        Size = UDim2.new(0, 300, 0, 60)
-    })
-    tweenIn:Play()
+    local character = game.Players.LocalPlayer.Character
+    if not character then return end
     
-    delay(3, function()
-        local tweenOut = TweenService:Create(Notification, TweenInfo.new(0.3), {
-            Size = UDim2.new(0, 0, 0, 60)
-        })
-        tweenOut:Play()
-        tweenOut.Completed:Connect(function()
-            Notification:Destroy()
-        end)
-    end)
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not rootPart or not FlightSystem.BodyGyro or not FlightSystem.BodyVelocity then return end
+    
+    if movingDirection.Magnitude > 0 then
+        local moveDirection = workspace.CurrentCamera.CFrame:VectorToWorldSpace(movingDirection)
+        FlightSystem.BodyVelocity.Velocity = moveDirection * FlightSystem.Speed
+        FlightSystem.BodyGyro.CFrame = workspace.CurrentCamera.CFrame
+    else
+        FlightSystem.BodyVelocity.Velocity = Vector3.new(0, 0, 0)
+    end
 end
 
--- Функция для плавного изменения цвета кнопки
-local function TweenButtonColor(button, color)
-    local tween = TweenService:Create(button, TweenInfo.new(0.2), {
-        BackgroundColor3 = color
-    })
-    tween:Play()
-end
-
--- Функция переключения видимости с анимацией
-ToggleButton.MouseButton1Click:Connect(function()
-    isVisible = not isVisible
-    TweenFrame(isVisible)
-    ShowNotification(isVisible and "Меню открыто" or "Меню закрыто")
+-- Обработка ввода
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
     
-    -- Анимация кнопки
-    TweenButtonColor(ToggleButton, isVisible and Color3.fromRGB(255, 60, 60) or Color3.fromRGB(60, 255, 60))
-    ToggleButton.Text = isVisible and "X" or "☰"
+    if FlightSystem.Enabled then
+        if input.KeyCode == Enum.KeyCode.W then
+            movingDirection = movingDirection + Vector3.new(0, 0, -1)
+        elseif input.KeyCode == Enum.KeyCode.S then
+            movingDirection = movingDirection + Vector3.new(0, 0, 1)
+        elseif input.KeyCode == Enum.KeyCode.D then
+            movingDirection = movingDirection + Vector3.new(1, 0, 0)
+        elseif input.KeyCode == Enum.KeyCode.A then
+            movingDirection = movingDirection + Vector3.new(-1, 0, 0)
+        elseif input.KeyCode == Enum.KeyCode.Space then
+            movingDirection = movingDirection + Vector3.new(0, 1, 0)
+        elseif input.KeyCode == Enum.KeyCode.LeftShift then
+            movingDirection = movingDirection + Vector3.new(0, -1, 0)
+        end
+    end
 end)
 
--- Функция полёта с анимацией
-local function ToggleFlight()
-    local character = game.Players.LocalPlayer.Character
-    if not character then return end
+UserInputService.InputEnded:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
     
-    local humanoid = character:FindFirstChild("Humanoid")
-    local rootPart = character:FindFirstChild("HumanoidRootPart")
-    if not humanoid or not rootPart then return end
-    
-    if not isFlying then
-        -- Анимация кнопки
-        TweenButtonColor(FlyButton, Color3.fromRGB(255, 80, 80))
-        
-        humanoid.PlatformStand = true
-        
-        -- Плавное создание физических объектов
-        task.spawn(function()
-            bodyGyro = Instance.new("BodyGyro")
-            bodyGyro.P = 10000
-            bodyGyro.MaxTorque = Vector3.new(10000, 10000, 10000)
-            bodyGyro.CFrame = workspace.CurrentCamera.CFrame
-            bodyGyro.Parent = rootPart
-            
-            bodyVelocity = Instance.new("BodyVelocity")
-            bodyVelocity.Velocity = Vector3.new(0, 0, 0)
-            bodyVelocity.MaxForce = Vector3.new(10000, 10000, 10000)
-            bodyVelocity.Parent = rootPart
-            
-            FlyButton.Text = "ВЫКЛЮЧИТЬ ПОЛЁТ"
-            ShowNotification("Полёт включен (Скорость: "..flySpeed..")")
-            isFlying = true
-        end)
-    else
-        -- Анимация кнопки
-        TweenButtonColor(FlyButton, Color3.fromRGB(80, 80, 255))
-        
-        humanoid.PlatformStand = false
-        if bodyGyro then bodyGyro:Destroy() end
-        if bodyVelocity then bodyVelocity:Destroy() end
-        
-        FlyButton.Text = "ВКЛЮЧИТЬ ПОЛЁТ"
-        ShowNotification("Полёт выключен")
-        isFlying = false
-    end
-end
-
--- Функция для изменения скорости полёта
-local function ApplySpeed()
-    local newSpeed = tonumber(SpeedBox.Text) or 50
-    newSpeed = math.clamp(newSpeed, 1, 1000)
-    
-    flySpeed = newSpeed
-    SpeedBox.Text = tostring(flySpeed)
-    
-    -- Плавное изменение текста
-    local tween = TweenService:Create(SpeedBox, TweenInfo.new(0.2), {
-        TextColor3 = Color3.new(0, 1, 0)
-    })
-    tween:Play()
-    tween.Completed:Wait()
-    task.wait(0.5)
-    tween = TweenService:Create(SpeedBox, TweenInfo.new(0.2), {
-        TextColor3 = Color3.new(1, 1, 1)
-    })
-    tween:Play()
-    
-    ShowNotification("Скорость полёта: "..flySpeed)
-end
-
--- Функция для изменения скорости ходьбы
-local function ApplyWalkSpeed()
-    local newSpeed = tonumber(WalkSpeedBox.Text) or 16
-    newSpeed = math.clamp(newSpeed, 1, 100)
-    
-    walkSpeed = newSpeed
-    WalkSpeedBox.Text = tostring(walkSpeed)
-    
-    -- Применяем скорость
-    local character = game.Players.LocalPlayer.Character
-    if character then
-        local humanoid = character:FindFirstChild("Humanoid")
-        if humanoid then
-            humanoid.WalkSpeed = walkSpeed
+    if FlightSystem.Enabled then
+        if input.KeyCode == Enum.KeyCode.W then
+            movingDirection = movingDirection - Vector3.new(0, 0, -1)
+        elseif input.KeyCode == Enum.KeyCode.S then
+            movingDirection = movingDirection - Vector3.new(0, 0, 1)
+        elseif input.KeyCode == Enum.KeyCode.D then
+            movingDirection = movingDirection - Vector3.new(1, 0, 0)
+        elseif input.KeyCode == Enum.KeyCode.A then
+            movingDirection = movingDirection - Vector3.new(-1, 0, 0)
+        elseif input.KeyCode == Enum.KeyCode.Space then
+            movingDirection = movingDirection - Vector3.new(0, 1, 0)
+        elseif input.KeyCode == Enum.KeyCode.LeftShift then
+            movingDirection = movingDirection - Vector3.new(0, -1, 0)
         end
     end
-    
-    -- Плавное изменение текста
-    local tween = TweenService:Create(WalkSpeedBox, TweenInfo.new(0.2), {
-        TextColor3 = Color3.new(0, 1, 0)
-    })
-    tween:Play()
-    tween.Completed:Wait()
-    task.wait(0.5)
-    tween = TweenService:Create(WalkSpeedBox, TweenInfo.new(0.2), {
-        TextColor3 = Color3.new(1, 1, 1)
-    })
-    tween:Play()
-    
-    ShowNotification("Скорость ходьбы: "..walkSpeed)
-end
+end)
 
--- Улучшенная функция подсветки игроков
-local function ToggleHighlight()
-    isHighlighting = not isHighlighting
-    
-    if isHighlighting then
-        -- Анимация кнопки
-        TweenButtonColor(HighlightButton, Color3.fromRGB(80, 255, 80))
-        HighlightButton.Text = "ОТКЛЮЧИТЬ ПОДСВЕТКУ"
-        ShowNotification("Подсветка игроков включена")
-        
-        -- Очищаем старые подсветки
-        CleanupHighlights()
-        
-        -- Подсвечиваем всех игроков
-        for _, player in ipairs(game.Players:GetPlayers()) do
-            if player ~= game.Players.LocalPlayer then
-                -- Создаем подсветку с задержкой для плавности
-                task.spawn(function()
-                    if player.Character then
-                        AddHighlight(player)
-                    end
-                    
-                    -- Обработчик для нового персонажа
-                    local conn = player.CharacterAdded:Connect(function(char)
-                        if isHighlighting then
-                            AddHighlight(player)
-                        end
-                    end)
-                    table.insert(connections, conn)
-                end)
-            end
-        end
-    else
-        -- Анимация кнопки
-        TweenButtonColor(HighlightButton, Color3.fromRGB(255, 80, 80))
-        HighlightButton.Text = "ПОДСВЕТКА ИГРОКОВ"
-        ShowNotification("Подсветка игроков выключена")
-        
-        CleanupHighlights()
-    end
-end
+-- Обработчики кнопок
+ToggleButton.MouseButton1Click:Connect(function()
+    local visible = not F.Visible
+    TweenFrame(visible)
+    ShowNotification(visible and "Меню открыто" or "Меню закрыто")
+    ToggleButton.Text = visible and "X" or "☰"
+    TweenService:Create(ToggleButton, TweenInfo.new(0.2), {
+        BackgroundColor3 = visible and Color3.fromRGB(255, 60, 60) or Color3.fromRGB(60, 255, 60)
+    }):Play()
+end)
 
--- Функция очистки подсветок
-local function CleanupHighlights()
-    for player, highlight in pairs(highlights) do
-        if highlight then
-            highlight:Destroy()
-        end
-    end
-    highlights = {}
-end
+FlyButton.MouseButton1Click:Connect(function()
+    FlightSystem:SetEnabled(not FlightSystem.Enabled)
+    FlyButton.Text = FlightSystem.Enabled and "ВЫКЛЮЧИТЬ ПОЛЁТ" or "ВКЛЮЧИТЬ ПОЛЁТ"
+    TweenService:Create(FlyButton, TweenInfo.new(0.2), {
+        BackgroundColor3 = FlightSystem.Enabled and Color3.fromRGB(255, 80, 80) or Color3.fromRGB(80, 80, 255)
+    }):Play()
+    ShowNotification(FlightSystem.Enabled and "Полёт включен" or "Полёт выключен")
+end)
 
--- Функция добавления подсветки для игрока
-local function AddHighlight(player)
-    if not player or not player.Character then return end
-    
-    -- Удаляем старую подсветку если есть
-    if highlights[player] then
-        highlights[player]:Destroy()
-    end
-    
-    -- Создаем новую подсветку
-    local highlight = Instance.new("Highlight")
-    highlight.FillColor = highlightColor
-    highlight.OutlineColor = Color3.new(
-        math.min(highlightColor.R * 1.5, 1),
-        math.min(highlightColor.G * 1.5, 1),
-        math.min(highlightColor.B * 1.5, 1)
-    )
-    highlight.Parent = player.Character
-    highlights[player] = highlight
-    
-    -- Обработчик для частей персонажа
-    local conn = player.Character.DescendantAdded:Connect(function(descendant)
-        if descendant:IsA("BasePart") and highlights[player] then
-            highlights[player].Parent = player.Character
-        end
-    end)
-    table.insert(connections, conn)
-end
+HighlightButton.MouseButton1Click:Connect(function()
+    HighlightSystem:SetEnabled(not HighlightSystem.Enabled)
+    HighlightButton.Text = HighlightSystem.Enabled and "ОТКЛЮЧИТЬ ПОДСВЕТКУ" or "ПОДСВЕТКА ИГРОКОВ"
+    TweenService:Create(HighlightButton, TweenInfo.new(0.2), {
+        BackgroundColor3 = HighlightSystem.Enabled and Color3.fromRGB(80, 255, 80) or Color3.fromRGB(255, 80, 80)
+    }):Play()
+    ShowNotification(HighlightSystem.Enabled and "Подсветка включена" or "Подсветка выключена")
+end)
 
--- Функция NoClip с анимацией
-local function ToggleNoClip()
-    isNoClip = not isNoClip
-    local character = game.Players.LocalPlayer.Character
-    if not character then return end
-    
-    if isNoClip then
-        -- Анимация кнопки
-        TweenButtonColor(NoClipButton, Color3.fromRGB(200, 100, 200))
-        NoClipButton.Text = "ВЫКЛЮЧИТЬ NOCLIP"
-        ShowNotification("NoClip включен")
-        
-        -- Сохраняем оригинальную скорость
-        local humanoid = character:FindFirstChild("Humanoid")
-        if humanoid then
-            originalWalkSpeed = humanoid.WalkSpeed
-        end
-        
-        -- Делаем все части Non-Collidable
-        for _, part in ipairs(character:GetDescendants()) do
-            if part:IsA("BasePart") then
-                part.CanCollide = false
-            end
-        end
-        
-        -- Обработчик для новых частей
-        local conn = character.DescendantAdded:Connect(function(descendant)
-            if descendant:IsA("BasePart") then
-                descendant.CanCollide = false
-            end
-        end)
-        table.insert(connections, conn)
-    else
-        -- Анимация кнопки
-        TweenButtonColor(NoClipButton, Color3.fromRGB(150, 50, 150))
-        NoClipButton.Text = "ВКЛЮЧИТЬ NOCLIP"
-        ShowNotification("NoClip выключен")
-        
-        -- Восстанавливаем Collision
-        for _, part in ipairs(character:GetDescendants()) do
-            if part:IsA("BasePart") then
-                part.CanCollide = true
-            end
-        end
-        
-        -- Восстанавливаем скорость
-        local humanoid = character:FindFirstChild("Humanoid")
-        if humanoid then
-            humanoid.WalkSpeed = originalWalkSpeed
-        end
-    end
-end
+NoClipButton.MouseButton1Click:Connect(function()
+    NoClipSystem:SetEnabled(not NoClipSystem.Enabled)
+    NoClipButton.Text = NoClipSystem.Enabled and "ВЫКЛЮЧИТЬ NOCLIP" or "ВКЛЮЧИТЬ NOCLIP"
+    TweenService:Create(NoClipButton, TweenInfo.new(0.2), {
+        BackgroundColor3 = NoClipSystem.Enabled and Color3.fromRGB(200, 100, 200) or Color3.fromRGB(150, 50, 150)
+    }):Play()
+    ShowNotification(NoClipSystem.Enabled and "NoClip включен" or "NoClip выключен")
+end)
 
--- Функция для применения цвета подсветки
-local function ApplyHighlightColor()
+ApplyColorButton.MouseButton1Click:Connect(function()
     local r = tonumber(RBox.Text) or 255
     local g = tonumber(GBox.Text) or 50
     local b = tonumber(BBox.Text) or 50
@@ -549,9 +470,9 @@ local function ApplyHighlightColor()
     g = math.clamp(g, 0, 255)
     b = math.clamp(b, 0, 255)
     
-    highlightColor = Color3.fromRGB(r, g, b)
+    HighlightSystem:SetColor(Color3.fromRGB(r, g, b))
     
-    -- Анимация изменения цвета
+    -- Анимация кнопки
     local tween = TweenService:Create(ApplyColorButton, TweenInfo.new(0.2), {
         BackgroundColor3 = Color3.fromRGB(0, 255, 0)
     })
@@ -563,151 +484,11 @@ local function ApplyHighlightColor()
     })
     tween:Play()
     
-    if isHighlighting then
-        for player, highlight in pairs(highlights) do
-            if highlight and player.Character then
-                highlight.FillColor = highlightColor
-                highlight.OutlineColor = Color3.new(
-                    math.min(highlightColor.R * 1.5, 1),
-                    math.min(highlightColor.G * 1.5, 1),
-                    math.min(highlightColor.B * 1.5, 1)
-                )
-                highlight.Parent = player.Character
-            end
-        end
-    end
-    
     ShowNotification(string.format("Цвет изменён: %d, %d, %d", r, g, b))
-end
-
--- Очистка всех соединений
-local function CleanupConnections()
-    for _, conn in ipairs(connections) do
-        conn:Disconnect()
-    end
-    connections = {}
-end
-
--- Обработчики кнопок
-FlyButton.MouseButton1Click:Connect(ToggleFlight)
-HighlightButton.MouseButton1Click:Connect(ToggleHighlight)
-NoClipButton.MouseButton1Click:Connect(ToggleNoClip)
-ApplyColorButton.MouseButton1Click:Connect(ApplyHighlightColor)
-ApplySpeedButton.MouseButton1Click:Connect(ApplySpeed)
-ApplyWalkSpeedButton.MouseButton1Click:Connect(ApplyWalkSpeed)
-
--- Обработчик для новых игроков
-game.Players.PlayerAdded:Connect(function(player)
-    if isHighlighting then
-        local conn = player.CharacterAdded:Connect(function(char)
-            AddHighlight(player)
-        end)
-        table.insert(connections, conn)
-    end
-end)
-
--- Управление полётом
-local UserInputService = game:GetService("UserInputService")
-local movingDirection = Vector3.new(0, 0, 0)
-
-local function UpdateFlight(dt)
-    if not isFlying then return end
-    
-    local character = game.Players.LocalPlayer.Character
-    if not character then return end
-    
-    local rootPart = character:FindFirstChild("HumanoidRootPart")
-    if not rootPart or not bodyGyro or not bodyVelocity then return end
-    
-    if movingDirection.Magnitude > 0 then
-        local moveDirection = workspace.CurrentCamera.CFrame:VectorToWorldSpace(movingDirection)
-        bodyVelocity.Velocity = moveDirection * flySpeed
-        bodyGyro.CFrame = workspace.CurrentCamera.CFrame
-    else
-        bodyVelocity.Velocity = Vector3.new(0, 0, 0)
-    end
-end
-
--- Обработка ввода для полёта
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if not isFlying or gameProcessed then return end
-    
-    if input.KeyCode == Enum.KeyCode.W then
-        movingDirection = movingDirection + Vector3.new(0, 0, -1)
-    elseif input.KeyCode == Enum.KeyCode.S then
-        movingDirection = movingDirection + Vector3.new(0, 0, 1)
-    elseif input.KeyCode == Enum.KeyCode.D then
-        movingDirection = movingDirection + Vector3.new(1, 0, 0)
-    elseif input.KeyCode == Enum.KeyCode.A then
-        movingDirection = movingDirection + Vector3.new(-1, 0, 0)
-    elseif input.KeyCode == Enum.KeyCode.Space then
-        movingDirection = movingDirection + Vector3.new(0, 1, 0)
-    elseif input.KeyCode == Enum.KeyCode.LeftShift then
-        movingDirection = movingDirection + Vector3.new(0, -1, 0)
-    end
-end)
-
-UserInputService.InputEnded:Connect(function(input, gameProcessed)
-    if not isFlying or gameProcessed then return end
-    
-    if input.KeyCode == Enum.KeyCode.W then
-        movingDirection = movingDirection - Vector3.new(0, 0, -1)
-    elseif input.KeyCode == Enum.KeyCode.S then
-        movingDirection = movingDirection - Vector3.new(0, 0, 1)
-    elseif input.KeyCode == Enum.KeyCode.D then
-        movingDirection = movingDirection - Vector3.new(1, 0, 0)
-    elseif input.KeyCode == Enum.KeyCode.A then
-        movingDirection = movingDirection - Vector3.new(-1, 0, 0)
-    elseif input.KeyCode == Enum.KeyCode.Space then
-        movingDirection = movingDirection - Vector3.new(0, 1, 0)
-    elseif input.KeyCode == Enum.KeyCode.LeftShift then
-        movingDirection = movingDirection - Vector3.new(0, -1, 0)
-    end
 end)
 
 -- Основной цикл
-game:GetService("RunService").Heartbeat:Connect(function(dt)
-    UpdateFlight(dt)
-    
-    -- Автоматическая очистка несуществующих подсветок
-    if isHighlighting then
-        for player, highlight in pairs(highlights) do
-            if not player or not player.Character or not highlight then
-                if highlight then highlight:Destroy() end
-                highlights[player] = nil
-            end
-        end
-    end
-    
-    -- Автоматическое применение скорости ходьбы при появлении персонажа
-    local character = game.Players.LocalPlayer.Character
-    if character and not isNoClip then
-        local humanoid = character:FindFirstChild("Humanoid")
-        if humanoid and humanoid.WalkSpeed ~= walkSpeed then
-            humanoid.WalkSpeed = walkSpeed
-        end
-    end
-end)
+RunService.Heartbeat:Connect(UpdateFlight)
 
--- Очистка при выходе
-game.Players.LocalPlayer.CharacterRemoving:Connect(function()
-    CleanupConnections()
-    CleanupHighlights()
-end)
-
--- Применяем начальную скорость ходьбы
-local function Initialize()
-    local character = game.Players.LocalPlayer.Character
-    if character then
-        local humanoid = character:FindFirstChild("Humanoid")
-        if humanoid then
-            walkSpeed = humanoid.WalkSpeed
-            WalkSpeedBox.Text = tostring(walkSpeed)
-            originalWalkSpeed = walkSpeed
-        end
-    end
-end
-
--- Задержка для инициализации
-task.wait(1)
-Initialize()
+-- Инициализация
+TweenFrame(true)
